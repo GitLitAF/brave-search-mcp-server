@@ -23,10 +23,23 @@ npm run build
 
 ## Configuration
 
+**IMPORTANT**: This tool matches Claude's native `web_search_20250305` architecture. Configuration is set **at initialization** (via environment variables), NOT per tool call.
+
 Create a `.env` file:
 
 ```env
+# Required
 BRAVE_API_KEY=your_brave_search_api_key_here
+
+# Optional: Tool configuration (set once at startup)
+WEB_SEARCH_MAX_USES=5
+WEB_SEARCH_MAX_RESULTS=5
+WEB_SEARCH_ALLOWED_DOMAINS=example.com,trusteddomain.org
+WEB_SEARCH_BLOCKED_DOMAINS=untrustedsource.com
+WEB_SEARCH_LOCATION_CITY=San Francisco
+WEB_SEARCH_LOCATION_REGION=California
+WEB_SEARCH_LOCATION_COUNTRY=US
+WEB_SEARCH_LOCATION_TIMEZONE=America/Los_Angeles
 ```
 
 Get your Brave Search API key from: https://brave.com/search/api/
@@ -40,41 +53,31 @@ npm run build
 node dist/index.js
 ```
 
-### Tool Parameters
+### Tool Input (Matching Native Tool)
 
-The `web_search` tool accepts the following parameters (matching Claude's native tool):
-
-```typescript
-{
-  query: string;                    // Required: The search query
-  max_uses?: number;                // Optional: Limit searches per session
-  allowed_domains?: string[];       // Optional: Whitelist domains
-  blocked_domains?: string[];       // Optional: Blacklist domains
-  user_location?: {                 // Optional: Localize results
-    type: 'approximate';
-    city: string;
-    region: string;
-    country: string;
-    timezone: string;
-  };
-  fetch_page_content?: boolean;     // Optional: Fetch full content (default: true)
-  max_results?: number;             // Optional: Max results to return (default: 5)
-}
-```
-
-### Example Tool Call
+The `web_search` tool accepts **only a query parameter** per call, just like Claude's native tool:
 
 ```json
 {
   "name": "web_search",
   "arguments": {
-    "query": "latest developments in quantum computing 2025",
-    "max_results": 5,
-    "fetch_page_content": true,
-    "allowed_domains": ["arxiv.org", "nature.com", "science.org"]
+    "query": "latest developments in quantum computing 2025"
   }
 }
 ```
+
+### Configuration Parameters
+
+Configuration is set at **server initialization** via environment variables:
+
+| Environment Variable | Description | Example |
+|---------------------|-------------|---------|
+| `BRAVE_API_KEY` | **Required** - Brave Search API key | `BSA...` |
+| `WEB_SEARCH_MAX_USES` | Max searches per session | `5` |
+| `WEB_SEARCH_ALLOWED_DOMAINS` | Comma-separated domain whitelist | `arxiv.org,nature.com` |
+| `WEB_SEARCH_BLOCKED_DOMAINS` | Comma-separated domain blacklist | `spam.com` |
+| `WEB_SEARCH_MAX_RESULTS` | Max results to return | `5` |
+| `WEB_SEARCH_LOCATION_*` | User location (city, region, country, timezone) | See above |
 
 ### Response Format
 
@@ -112,20 +115,61 @@ Plus a citations block:
 }
 ```
 
-## Comparison with Native Tool
+## Architecture Comparison
+
+### Native Tool (`web_search_20250305`)
+```json
+// Configuration in API request
+"tools": [{
+  "type": "web_search_20250305",
+  "name": "web_search",
+  "max_uses": 5,
+  "allowed_domains": ["example.com"],
+  "blocked_domains": ["spam.com"]
+}]
+
+// Tool call (just query)
+{
+  "name": "web_search",
+  "input": { "query": "search terms" }
+}
+```
+
+### This MCP Server
+```bash
+# Configuration via environment
+export WEB_SEARCH_MAX_USES=5
+export WEB_SEARCH_ALLOWED_DOMAINS=example.com
+export WEB_SEARCH_BLOCKED_DOMAINS=spam.com
+node dist/index.js
+```
+
+```json
+// Tool call (just query)
+{
+  "name": "web_search",
+  "arguments": { "query": "search terms" }
+}
+```
+
+**✅ Identical usage pattern**: Configuration at initialization, query-only tool calls
+
+## Feature Comparison
 
 | Feature | Native web_search_20250305 | This MCP Server |
 |---------|---------------------------|-----------------|
+| **Architecture** | Config in API request | Config via env vars |
+| **Tool Input** | `{ query }` only ✓ | `{ query }` only ✓ |
 | Search Provider | Brave Search | Brave Search ✓ |
 | Content Fetching | Built-in | HTML→Markdown ✓ |
 | Citations | Automatic | Extracted ✓ |
-| Domain Filtering | Yes | Yes ✓ |
-| Localization | Yes | Yes ✓ |
+| Domain Filtering | Yes ✓ | Yes ✓ |
+| Localization | Yes ✓ | Yes ✓ |
 | Encrypted Content | AES encryption | Base64 encoding* |
 | Usage Tracking | Server-side | Per-session ✓ |
 | Pricing | $10/1000 searches | API key costs |
 
-*Note: This implementation uses Base64 encoding instead of encryption since MCP servers don't have access to Claude's encryption keys. The functionality is identical for caching purposes.
+*Note: Base64 encoding instead of encryption (MCP servers don't have access to Claude's encryption keys). Functionality is identical for caching purposes.
 
 ## Architecture
 

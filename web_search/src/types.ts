@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
 /**
- * Web search tool parameters matching Claude's native web_search_20250305 tool
+ * Tool configuration - set at initialization, not per-call
+ * Matches Claude's native web_search_20250305 architecture
  */
-export const WebSearchParamsSchema = z.object({
-  query: z.string().describe('The search query to execute'),
+export const WebSearchConfigSchema = z.object({
   max_uses: z.number().optional().describe('Maximum number of searches to perform'),
   allowed_domains: z
     .array(z.string())
@@ -24,19 +24,37 @@ export const WebSearchParamsSchema = z.object({
     })
     .optional()
     .describe('Localize search results based on user location'),
-  fetch_page_content: z
-    .boolean()
-    .optional()
-    .default(true)
-    .describe('Whether to fetch full page content for results'),
-  max_results: z
-    .number()
-    .optional()
-    .default(5)
-    .describe('Maximum number of search results to return'),
+  max_results: z.number().optional().describe('Maximum number of search results to return'),
 });
 
-export type WebSearchParams = z.infer<typeof WebSearchParamsSchema>;
+export type WebSearchConfig = z.infer<typeof WebSearchConfigSchema>;
+
+/**
+ * Tool input - only query parameter, matching native tool
+ */
+export const WebSearchInputSchema = z.object({
+  query: z.string().describe('The search query to execute'),
+});
+
+export type WebSearchInput = z.infer<typeof WebSearchInputSchema>;
+
+/**
+ * Internal search parameters combining config and input
+ */
+export interface WebSearchParams {
+  query: string;
+  max_uses?: number;
+  allowed_domains?: string[];
+  blocked_domains?: string[];
+  user_location?: {
+    type: 'approximate';
+    city: string;
+    region: string;
+    country: string;
+    timezone: string;
+  };
+  max_results?: number;
+}
 
 /**
  * Brave Search API Response Types

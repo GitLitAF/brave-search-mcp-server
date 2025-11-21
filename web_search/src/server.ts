@@ -13,7 +13,8 @@ import {
 import { BraveSearchClient } from './brave-api.js';
 import { fetchUrl, extractCitations } from './fetch.js';
 import {
-  WebSearchParamsSchema,
+  WebSearchInputSchema,
+  type WebSearchConfig,
   type WebSearchParams,
   type WebSearchResult,
 } from './types.js';
@@ -22,8 +23,9 @@ export class WebSearchServer {
   private server: Server;
   private braveClient: BraveSearchClient;
   private searchCount: number = 0;
+  private config: WebSearchConfig;
 
-  constructor() {
+  constructor(config?: WebSearchConfig) {
     this.server = new Server(
       {
         name: 'web-search-mcp-server',
@@ -36,6 +38,8 @@ export class WebSearchServer {
       }
     );
 
+    // Store configuration - this is set once at initialization, like native tool
+    this.config = config || {};
     this.braveClient = new BraveSearchClient();
     this.setupHandlers();
   }
@@ -65,48 +69,15 @@ The tool returns results with:
 - Full page content (converted to markdown)
 - Citations with source URLs and titles
 - Page age information
-- Encrypted content for multi-turn caching`,
+- Encrypted content for multi-turn caching
+
+Note: Configuration (max_uses, allowed_domains, etc.) is set at server initialization.`,
             inputSchema: {
               type: 'object',
               properties: {
                 query: {
                   type: 'string',
                   description: 'The search query to execute',
-                },
-                max_uses: {
-                  type: 'number',
-                  description: 'Maximum number of searches to perform',
-                },
-                allowed_domains: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Only include results from these domains',
-                },
-                blocked_domains: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Never include results from these domains',
-                },
-                user_location: {
-                  type: 'object',
-                  properties: {
-                    type: { type: 'string', enum: ['approximate'] },
-                    city: { type: 'string' },
-                    region: { type: 'string' },
-                    country: { type: 'string' },
-                    timezone: { type: 'string' },
-                  },
-                  description: 'Localize search results based on user location',
-                },
-                fetch_page_content: {
-                  type: 'boolean',
-                  description: 'Whether to fetch full page content for results',
-                  default: true,
-                },
-                max_results: {
-                  type: 'number',
-                  description: 'Maximum number of search results to return',
-                  default: 5,
                 },
               },
               required: ['query'],
@@ -122,7 +93,15 @@ The tool returns results with:
         throw new Error(`Unknown tool: ${request.params.name}`);
       }
 
-      const params = WebSearchParamsSchema.parse(request.params.arguments);
+      // Parse input (only query)
+      const input = WebSearchInputSchema.parse(request.params.arguments);
+
+      // Combine with stored configuration
+      const params: WebSearchParams = {
+        query: input.query,
+        ...this.config,
+      };
+
       return await this.executeWebSearch(params);
     });
   }
@@ -131,8 +110,8 @@ The tool returns results with:
    * Execute web search with content fetching
    */
   private async executeWebSearch(params: WebSearchParams) {
-    // Check max_uses limit
-    if (params.max_uses && this.searchCount >= params.max_uses) {
+    // Check max_uses limit (from config)
+    if (this.config.max_uses && this.searchCount >= this.config.max_uses) {
       return {
         content: [
           {
@@ -140,7 +119,7 @@ The tool returns results with:
             text: JSON.stringify({
               type: 'web_search_tool_result_error',
               error_code: 'max_uses_exceeded',
-              message: `Maximum web search uses (${params.max_uses}) exceeded`,
+              message: `Maximum web search uses (${this.config.max_uses}) exceeded`,
             }),
           },
         ],
@@ -153,11 +132,11 @@ The tool returns results with:
       // Execute search
       let searchResults = await this.braveClient.search(params);
 
-      // Apply domain filtering
+      // Apply domain filtering (from config)
       searchResults = this.braveClient.filterByDomains(
         searchResults,
-        params.allowed_domains,
-        params.blocked_domains
+        this.config.allowed_domains,
+        this.config.blocked_domains
       );
 
       if (!searchResults.web?.results || searchResults.web.results.length === 0) {
@@ -178,7 +157,7 @@ The tool returns results with:
       // Fetch full content for results
       const results: WebSearchResult[] = [];
       const maxResults = Math.min(
-        params.max_results || 5,
+        this.config.max_results || 5,
         searchResults.web.results.length
       );
 
@@ -188,13 +167,11 @@ The tool returns results with:
         let content = result.description || '';
         let title = result.title;
 
-        // Fetch full page content if requested
-        if (params.fetch_page_content !== false) {
-          const fetched = await fetchUrl(result.url);
-          if (!fetched.error && fetched.content) {
-            content = fetched.content;
-            if (fetched.title) title = fetched.title;
-          }
+        // Always fetch full page content (matching native behavior)
+        const fetched = await fetchUrl(result.url);
+        if (!fetched.error && fetched.content) {
+          content = fetched.content;
+          if (fetched.title) title = fetched.title;
         }
 
         // Encode content for caching (simulates encryption)
@@ -210,7 +187,7 @@ The tool returns results with:
         });
       }
 
-      // Format response similar to native tool
+      // Format response matching native tool structure
       const response = {
         type: 'web_search_tool_result',
         search_query: params.query,
