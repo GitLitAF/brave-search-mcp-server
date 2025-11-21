@@ -1,0 +1,43 @@
+{
+  "name": "@anthropic/web-search-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP Server recreating Claude's native web search tool with Brave Search API and web fetching",
+  "keywords": [
+    "api",
+    "brave",
+    "mcp",
+    "search",
+    "web-search",
+    "citations"
+  ],
+  "license": "MIT",
+  "author": "Anthropic",
+  "type": "module",
+  "module": "dist/index.js",
+  "bin": {
+    "web-search-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/*.js",
+    "watch": "tsc --watch",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.21.1",
+    "commander": "14.0.2",
+    "dotenv": "17.2.3",
+    "zod": "3.25.76",
+    "turndown": "^7.2.0",
+    "node-html-parser": "^6.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "@types/turndown": "^5.0.5",
+    "prettier": "3.6.2",
+    "typescript": "5.9.3"
+  }
+}
