@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PixelBlast CA Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      background: #0a0a0a;
+      color: #fff;
+      font-family: 'Monaco', 'Courier New', monospace;
+      overflow: hidden;
+    }
+    #container {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+    #controls {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 20px;
+      border-radius: 8px;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+    }
+    #controls h2 {
+      margin-bottom: 15px;
+      font-size: 18px;
+      color: #B19EEF;
+    }
+    .control-group {
+      margin-bottom: 12px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 12px;
+      color: #aaa;
+    }
+    select, input[type="range"], input[type="number"], input[type="color"] {
+      width: 100%;
+      padding: 5px;
+      background: #222;
+      border: 1px solid #444;
+      color: #fff;
+      border-radius: 4px;
+    }
+    button {
+      width: 100%;
+      padding: 8px;
+      background: #B19EEF;
+      color: #000;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    button:hover {
+      background: #c5b3f5;
+    }
+    .info {
+      font-size: 11px;
+      color: #666;
+      margin-top: 5px;
+    }
+    #fps {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 10px 15px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #B19EEF;
+    }
+  </style>
+</head>
+<body>
+  <div id="container"></div>
+
+  <div id="controls">
+    <h2>Cellular Automata Controls</h2>
+
+    <div class="control-group">
+      <label>CA Rule</label>
+      <select id="rule">
+        <option value="0">Conway's Game of Life</option>
+        <option value="1" selected>HighLife (Chaotic)</option>
+        <option value="2">Day & Night</option>
+        <option value="3">Seeds (Explosive)</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label>Shape</label>
+      <select id="shape">
+        <option value="square">Square</option>
+        <option value="circle" selected>Circle</option>
+        <option value="triangle">Triangle</option>
+        <option value="diamond">Diamond</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label>Speed: <span id="speedVal">10</span> gen/s</label>
+      <input type="range" id="speed" min="1" max="30" value="10" step="1">
+    </div>
+
+    <div class="control-group">
+      <label>Pixel Size: <span id="pixelSizeVal">4</span>px</label>
+      <input type="range" id="pixelSize" min="2" max="12" value="4" step="1">
+    </div>
+
+    <div class="control-group">
+      <label>Click Radius: <span id="clickRadiusVal">8</span></label>
+      <input type="range" id="clickRadius" min="3" max="20" value="8" step="1">
+    </div>
+
+    <div class="control-group">
+      <label>Color</label>
+      <input type="color" id="color" value="#B19EEF">
+    </div>
+
+    <button id="reset">Reset / Randomize</button>
+
+    <div class="info">
+      Click anywhere to spawn patterns!<br>
+      They'll evolve according to CA rules.
+    </div>
+  </div>
+
+  <div id="fps">FPS: 0 | Gen: 0</div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    const SHAPE_MAP = { square: 0, circle: 1, triangle: 2, diamond: 3 };
+
+    class PixelBlastCA {
+      constructor(container, options = {}) {
+        this.container = container;
+        this.options = {
+          variant: options.variant || 'circle',
+          pixelSize: options.pixelSize || 4,
+          color: options.color || '#B19EEF',
+          caRule: options.caRule || 1,
+          speed: options.speed || 10,
+          initialDensity: options.initialDensity || 0.15,
+          clickRadius: options.clickRadius || 8,
+          edgeFade: options.edgeFade || 0.25
+        };
+
+        this.generation = 0;
+        this.fps = 0;
+        this.lastTime = 0;
+        this.frameCount = 0;
+
+        this.init();
+      }
+
+      init() {
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+        renderer.setClearAlpha(0);
+        this.container.appendChild(renderer.domElement);
+        this.renderer = renderer;
+
+        const w = renderer.domElement.width;
+        const h = renderer.domElement.height;
+
+        // Create render targets
+        this.targetA = new THREE.WebGLRenderTarget(w, h, {
+          minFilter: THREE.NearestFilter,
+          magFilter: THREE.NearestFilter,
+          format: THREE.RGBAFormat,
+          type: THREE.FloatType
+        });
+        this.targetB = new THREE.WebGLRenderTarget(w, h, {
+          minFilter: THREE.NearestFilter,
+          magFilter: THREE.NearestFilter,
+          format: THREE.RGBAFormat,
+          type: THREE.FloatType
+        });
+
+        // CA scene
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        this.camera = camera;
+
+        this.caScene = new THREE.Scene();
+        this.caUniforms = {
+          previousState: { value: null },
+          uResolution: { value: new THREE.Vector2(w, h) },
+          uCellSize: { value: new THREE.Vector2(1/w, 1/h) },
+          uRule: { value: this.options.caRule }
+        };
+
+        const caMaterial = new THREE.ShaderMaterial({
+          vertexShader: `void main() { gl_Position = vec4(position, 1.0); }`,
+          fragmentShader: `
+            precision highp float;
+            uniform sampler2D previousState;
+            uniform vec2 uResolution;
+            uniform vec2 uCellSize;
+            uniform int uRule;
+
+            void main() {
+              vec2 uv = gl_FragCoord.xy / uResolution;
+              float current = texture2D(previousState, uv).r;
+
+              float neighbors = 0.0;
+              for(int x = -1; x <= 1; x++) {
+                for(int y = -1; y <= 1; y++) {
+                  if(x == 0 && y == 0) continue;
+                  vec2 offset = vec2(float(x), float(y)) * uCellSize;
+                  neighbors += texture2D(previousState, uv + offset).r;
+                }
+              }
+
+              float next = 0.0;
+              if (uRule == 0) {
+                if(current > 0.5) {
+                  if(neighbors >= 1.5 && neighbors <= 3.5) next = 1.0;
+                } else {
+                  if(neighbors >= 2.5 && neighbors <= 3.5) next = 1.0;
+                }
+              } else if (uRule == 1) {
+                if(current > 0.5) {
+                  if(neighbors >= 1.5 && neighbors <= 3.5) next = 1.0;
+                } else {
+                  if(neighbors >= 2.5 && neighbors <= 3.5) next = 1.0;
+                  if(neighbors >= 5.5 && neighbors <= 6.5) next = 1.0;
+                }
+              } else if (uRule == 2) {
+                if(current > 0.5) {
+                  if(neighbors >= 2.5 && neighbors <= 4.5) next = 1.0;
+                  if(neighbors >= 5.5 && neighbors <= 8.5) next = 1.0;
+                } else {
+                  if(neighbors >= 2.5 && neighbors <= 4.5) next = 1.0;
+                  if(neighbors >= 5.5 && neighbors <= 8.5) next = 1.0;
+                }
+              } else {
+                if(current < 0.5 && neighbors >= 1.5 && neighbors <= 2.5) next = 1.0;
+              }
+
+              gl_FragColor = vec4(next, next, next, 1.0);
+            }
+          `,
+          uniforms: this.caUniforms
+        });
+
+        const caQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), caMaterial);
+        this.caScene.add(caQuad);
+
+        // Display scene
+        this.displayScene = new THREE.Scene();
+        this.displayUniforms = {
+          caState: { value: null },
+          uColor: { value: new THREE.Color(this.options.color) },
+          uResolution: { value: new THREE.Vector2(w, h) },
+          uPixelSize: { value: this.options.pixelSize * renderer.getPixelRatio() },
+          uEdgeFade: { value: this.options.edgeFade },
+          uShapeType: { value: SHAPE_MAP[this.options.variant] }
+        };
+
+        const displayMaterial = new THREE.ShaderMaterial({
+          vertexShader: `void main() { gl_Position = vec4(position, 1.0); }`,
+          fragmentShader: `
+            precision highp float;
+            uniform sampler2D caState;
+            uniform vec3 uColor;
+            uniform vec2 uResolution;
+            uniform float uPixelSize;
+            uniform float uEdgeFade;
+            uniform int uShapeType;
+
+            float maskCircle(vec2 p, float cov) {
+              float r = sqrt(cov) * 0.25;
+              float d = length(p - 0.5) - r;
+              float aa = 0.5 * fwidth(d);
+              return cov * (1.0 - smoothstep(-aa, aa, d * 2.0));
+            }
+
+            float maskTriangle(vec2 p, vec2 id, float cov) {
+              bool flip = mod(id.x + id.y, 2.0) > 0.5;
+              if (flip) p.x = 1.0 - p.x;
+              float r = sqrt(cov);
+              float d = p.y - r * (1.0 - p.x);
+              float aa = fwidth(d);
+              return cov * clamp(0.5 - d/aa, 0.0, 1.0);
+            }
+
+            float maskDiamond(vec2 p, float cov) {
+              float r = sqrt(cov) * 0.564;
+              return step(abs(p.x - 0.49) + abs(p.y - 0.49), r);
+            }
+
+            void main() {
+              vec2 fragCoord = gl_FragCoord.xy;
+              vec2 uv = fragCoord / uResolution;
+              vec2 pixelId = floor(fragCoord / uPixelSize);
+              vec2 pixelUV = fract(fragCoord / uPixelSize);
+
+              float state = texture2D(caState, uv).r;
+              float M = state;
+
+              if (state > 0.5) {
+                if (uShapeType == 1) M = maskCircle(pixelUV, 1.0);
+                else if (uShapeType == 2) M = maskTriangle(pixelUV, pixelId, 1.0);
+                else if (uShapeType == 3) M = maskDiamond(pixelUV, 1.0);
+              }
+
+              if (uEdgeFade > 0.0) {
+                vec2 norm = fragCoord / uResolution;
+                float edge = min(min(norm.x, norm.y), min(1.0 - norm.x, 1.0 - norm.y));
+                float fade = smoothstep(0.0, uEdgeFade, edge);
+                M *= fade;
+              }
+
+              gl_FragColor = vec4(uColor, M);
+            }
+          `,
+          uniforms: this.displayUniforms,
+          transparent: true
+        });
+
+        const displayQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), displayMaterial);
+        this.displayScene.add(displayQuad);
+
+        this.initialize();
+
+        // Click handler
+        renderer.domElement.addEventListener('pointerdown', (e) => this.spawn(e));
+
+        // Animation
+        this.lastUpdateTime = 0;
+        this.animate(0);
+      }
+
+      initialize() {
+        const w = this.renderer.domElement.width;
+        const h = this.renderer.domElement.height;
+        const size = w * h * 4;
+        const data = new Float32Array(size);
+
+        for (let i = 0; i < size; i += 4) {
+          const alive = Math.random() < this.options.initialDensity ? 1.0 : 0.0;
+          data[i] = data[i + 1] = data[i + 2] = alive;
+          data[i + 3] = 1.0;
+        }
+
+        const texture = new THREE.DataTexture(data, w, h, THREE.RGBAFormat, THREE.FloatType);
+        texture.needsUpdate = true;
+
+        const initScene = new THREE.Scene();
+        const initMat = new THREE.ShaderMaterial({
+          vertexShader: `void main() { gl_Position = vec4(position, 1.0); }`,
+          fragmentShader: `
+            precision highp float;
+            uniform sampler2D initTex;
+            void main() {
+              vec2 uv = gl_FragCoord.xy / vec2(${w}.0, ${h}.0);
+              gl_FragColor = texture2D(initTex, uv);
+            }
+          `,
+          uniforms: { initTex: { value: texture } }
+        });
+        const initQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), initMat);
+        initScene.add(initQuad);
+
+        this.renderer.setRenderTarget(this.targetA);
+        this.renderer.render(initScene, this.camera);
+        this.renderer.setRenderTarget(null);
+
+        this.generation = 0;
+      }
+
+      spawn(e) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        const scaleX = this.renderer.domElement.width / rect.width;
+        const scaleY = this.renderer.domElement.height / rect.height;
+        const x = (e.clientX - rect.left) * scaleX;
+        const y = this.renderer.domElement.height - (e.clientY - rect.top) * scaleY;
+
+        const w = this.renderer.domElement.width;
+        const h = this.renderer.domElement.height;
+
+        const spawnScene = new THREE.Scene();
+        const spawnMat = new THREE.ShaderMaterial({
+          vertexShader: `void main() { gl_Position = vec4(position, 1.0); }`,
+          fragmentShader: `
+            precision highp float;
+            uniform sampler2D prevState;
+            uniform vec2 clickPos;
+            uniform float radius;
+            uniform vec2 resolution;
+            void main() {
+              vec2 uv = gl_FragCoord.xy / resolution;
+              float dist = length(gl_FragCoord.xy - clickPos);
+              float current = texture2D(prevState, uv).r;
+              float spawn = dist < radius ? 1.0 : current;
+              gl_FragColor = vec4(spawn, spawn, spawn, 1.0);
+            }
+          `,
+          uniforms: {
+            prevState: { value: this.targetA.texture },
+            clickPos: { value: new THREE.Vector2(x, y) },
+            radius: { value: this.options.clickRadius },
+            resolution: { value: new THREE.Vector2(w, h) }
+          }
+        });
+        const spawnQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), spawnMat);
+        spawnScene.add(spawnQuad);
+
+        this.renderer.setRenderTarget(this.targetB);
+        this.renderer.render(spawnScene, this.camera);
+        this.renderer.setRenderTarget(null);
+
+        [this.targetA, this.targetB] = [this.targetB, this.targetA];
+      }
+
+      animate(time) {
+        requestAnimationFrame((t) => this.animate(t));
+
+        const updateInterval = 1000 / this.options.speed;
+
+        if (time - this.lastUpdateTime >= updateInterval) {
+          this.lastUpdateTime = time;
+
+          // Update CA
+          this.caUniforms.previousState.value = this.targetA.texture;
+          this.renderer.setRenderTarget(this.targetB);
+          this.renderer.render(this.caScene, this.camera);
+          this.renderer.setRenderTarget(null);
+
+          [this.targetA, this.targetB] = [this.targetB, this.targetA];
+          this.generation++;
+        }
+
+        // Display
+        this.displayUniforms.caState.value = this.targetA.texture;
+        this.renderer.render(this.displayScene, this.camera);
+
+        // FPS
+        this.frameCount++;
+        if (time - this.lastTime >= 1000) {
+          this.fps = this.frameCount;
+          this.frameCount = 0;
+          this.lastTime = time;
+        }
+      }
+
+      updateOptions(options) {
+        Object.assign(this.options, options);
+        this.caUniforms.uRule.value = this.options.caRule;
+        this.displayUniforms.uColor.value.set(this.options.color);
+        this.displayUniforms.uPixelSize.value = this.options.pixelSize * this.renderer.getPixelRatio();
+        this.displayUniforms.uShapeType.value = SHAPE_MAP[this.options.variant];
+      }
+    }
+
+    // Initialize
+    const container = document.getElementById('container');
+    const ca = new PixelBlastCA(container);
+
+    // Controls
+    const updateFPS = () => {
+      document.getElementById('fps').textContent = `FPS: ${ca.fps} | Gen: ${ca.generation}`;
+      requestAnimationFrame(updateFPS);
+    };
+    updateFPS();
+
+    document.getElementById('rule').addEventListener('change', (e) => {
+      ca.updateOptions({ caRule: parseInt(e.target.value) });
+    });
+
+    document.getElementById('shape').addEventListener('change', (e) => {
+      ca.updateOptions({ variant: e.target.value });
+    });
+
+    document.getElementById('speed').addEventListener('input', (e) => {
+      const val = parseInt(e.target.value);
+      document.getElementById('speedVal').textContent = val;
+      ca.updateOptions({ speed: val });
+    });
+
+    document.getElementById('pixelSize').addEventListener('input', (e) => {
+      const val = parseInt(e.target.value);
+      document.getElementById('pixelSizeVal').textContent = val;
+      ca.updateOptions({ pixelSize: val });
+    });
+
+    document.getElementById('clickRadius').addEventListener('input', (e) => {
+      const val = parseInt(e.target.value);
+      document.getElementById('clickRadiusVal').textContent = val;
+      ca.updateOptions({ clickRadius: val });
+    });
+
+    document.getElementById('color').addEventListener('input', (e) => {
+      ca.updateOptions({ color: e.target.value });
+    });
+
+    document.getElementById('reset').addEventListener('click', () => {
+      ca.initialize();
+    });
+
+    // Resize
+    window.addEventListener('resize', () => {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      ca.renderer.setSize(w, h);
+      ca.initialize();
+    });
+  </script>
+</body>
+</html>
